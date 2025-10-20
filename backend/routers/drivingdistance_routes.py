@@ -10,7 +10,13 @@ from ..models.drivingdistance import DrivingDistance
 from ..schemas.drivingdistance import DrivingDistanceCreate, DrivingDistanceOut
 from ..database import get_db
 
-router = APIRouter(prefix="/drivingdistance", tags=["drivingdistance"])
+from ..auth import verify_token   # ✅ add this import
+
+router = APIRouter(
+    prefix="/drivingdistance",
+    tags=["drivingdistance"],
+    dependencies=[Depends(verify_token)]  # ✅ protect all routes
+)
 
 # 🧭 Logging configuration
 logging.basicConfig(level=logging.INFO)
