@@ -254,9 +254,6 @@ def get_unique_plate_numbers(
 ):
     """
     🚚 Retrieve all unique plate numbers from the drivingdistance table.
-    Example:
-      GET /drivingdistance/plates
-      GET /drivingdistance/plates?limit=100
     """
     logger.info("📋 Fetching unique plate numbers...")
 
