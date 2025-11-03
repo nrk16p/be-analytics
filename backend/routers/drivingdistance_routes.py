@@ -1,21 +1,20 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import and_ ,func
+from sqlalchemy import and_, func
 from typing import List, Optional
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta, timezone
 from pydantic import BaseModel
 import logging
 
 from ..models.drivingdistance import DrivingDistance
 from ..schemas.drivingdistance import DrivingDistanceCreate, DrivingDistanceOut
 from ..database import get_db
-
-from ..auth import verify_token   # ✅ add this import
+from ..auth import verify_token
 
 router = APIRouter(
     prefix="/drivingdistance",
     tags=["drivingdistance"],
-    dependencies=[Depends(verify_token)]  # ✅ protect all routes
+    dependencies=[Depends(verify_token)]
 )
 
 # 🧭 Logging configuration
@@ -27,12 +26,19 @@ BKK_TZ = timezone(timedelta(hours=7))
 
 
 # ============================================================================
+# 🧱 DB Dependency Wrapper
+# ============================================================================
+def get_main_db():
+    yield from get_db("DB_MAIN")
+
+
+# ============================================================================
 # 🧱 BULK INSERT ENDPOINT
 # ============================================================================
 @router.post("/bulk", response_model=List[DrivingDistanceOut])
 def create_large_bulk_records(
     payload: List[DrivingDistanceCreate],
-    db: Session = Depends(lambda: next(get_db("DB_MAIN"))),
+    db: Session = Depends(get_main_db),
 ):
     total = len(payload)
     if total == 0:
@@ -53,7 +59,6 @@ def create_large_bulk_records(
             db.bulk_save_objects(records)
             db.commit()
 
-            # Optionally fetch inserted batch
             last_batch = (
                 db.query(DrivingDistance)
                 .order_by(DrivingDistance.id.desc())
@@ -72,7 +77,7 @@ def create_large_bulk_records(
 
 
 # ============================================================================
-# 🔍 FILTER MODEL (for POST /filter)
+# 🔍 FILTER MODEL
 # ============================================================================
 class DrivingDistanceFilter(BaseModel):
     plate_number: Optional[List[str]] = None
@@ -82,32 +87,20 @@ class DrivingDistanceFilter(BaseModel):
 
 
 # ============================================================================
-# 🔍 POST FILTER ENDPOINT (payload-style)
+# 🔍 POST FILTER ENDPOINT
 # ============================================================================
 @router.post("/filter", response_model=List[DrivingDistanceOut])
 def filter_driving_distance(
     payload: DrivingDistanceFilter,
-    db: Session = Depends(lambda: next(get_db("DB_MAIN"))),
+    db: Session = Depends(get_main_db),
 ):
-    """
-    🔍 Filter drivingdistance records via JSON payload
-    Example:
-    {
-      "plate_number": ["71-7389", "71-7390"],
-      "start_at": "2025-06-01",
-      "end_at": "2025-06-15"
-    }
-    """
     logger.info(f"📥 Payload filter: {payload}")
 
     query = db.query(DrivingDistance)
     filters = []
 
-    # 🧩 Multi-plate filter
     if payload.plate_number:
         filters.append(DrivingDistance.plate_number.in_(payload.plate_number))
-
-    # 🗓 Date range
     if payload.start_at and payload.end_at:
         filters.append(and_(DrivingDistance.date >= payload.start_at, DrivingDistance.date <= payload.end_at))
     elif payload.start_at:
@@ -119,11 +112,9 @@ def filter_driving_distance(
         query = query.filter(*filters)
 
     records = query.order_by(DrivingDistance.date.asc()).limit(payload.limit).all()
-
     if not records:
         raise HTTPException(status_code=404, detail="No matching records found")
 
-    # 🕒 Convert created_at to Bangkok time if available
     for record in records:
         if record.created_at:
             record.created_at = record.created_at.replace(tzinfo=timezone.utc).astimezone(BKK_TZ)
@@ -133,23 +124,16 @@ def filter_driving_distance(
 
 
 # ============================================================================
-# 🌐 GET FILTER ENDPOINT (query params)
+# 🌐 GET FILTER ENDPOINT
 # ============================================================================
 @router.get("/", response_model=List[DrivingDistanceOut])
 def get_driving_distance_records(
-    plate_number: Optional[List[str]] = Query(None, description="Filter by one or more plate numbers"),
-    start_at: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
-    end_at: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
-    limit: int = Query(500, description="Max records to return"),
-    db: Session = Depends(lambda: next(get_db("DB_MAIN"))),
+    plate_number: Optional[List[str]] = Query(None),
+    start_at: Optional[date] = Query(None),
+    end_at: Optional[date] = Query(None),
+    limit: int = Query(500),
+    db: Session = Depends(get_main_db),
 ):
-    """
-    🔍 Retrieve driving distance records filtered by:
-    - One or more plate numbers
-    - Date range (start_at / end_at)
-    Example:
-      /drivingdistance?plate_number=71-7389&plate_number=71-7390&start_at=2025-06-01&end_at=2025-06-30
-    """
     logger.info(f"📥 Query - plates: {plate_number}, start: {start_at}, end: {end_at}")
 
     query = db.query(DrivingDistance)
@@ -157,7 +141,6 @@ def get_driving_distance_records(
 
     if plate_number:
         filters.append(DrivingDistance.plate_number.in_(plate_number))
-
     if start_at and end_at:
         filters.append(and_(DrivingDistance.date >= start_at, DrivingDistance.date <= end_at))
     elif start_at:
@@ -169,11 +152,9 @@ def get_driving_distance_records(
         query = query.filter(*filters)
 
     records = query.order_by(DrivingDistance.date.asc()).limit(limit).all()
-
     if not records:
         raise HTTPException(status_code=404, detail="No matching records found")
 
-    # 🕒 Convert created_at to Bangkok time
     for record in records:
         if record.created_at:
             record.created_at = record.created_at.replace(tzinfo=timezone.utc).astimezone(BKK_TZ)
@@ -182,20 +163,14 @@ def get_driving_distance_records(
     return records
 
 
+# ============================================================================
+# 📊 SUMMARIZE DISTANCE ENDPOINT
+# ============================================================================
 @router.post("/sumdistance")
 def summarize_distance(
     payload: DrivingDistanceFilter,
-    db: Session = Depends(lambda: next(get_db("DB_MAIN"))),
+    db: Session = Depends(get_main_db),
 ):
-    """
-    📊 Summarize total distance grouped by plate_number.
-    Example Payload:
-    {
-      "plate_number": ["71-7389", "71-7390"],
-      "start_at": "2025-06-01",
-      "end_at": "2025-06-15"
-    }
-    """
     logger.info(f"📊 Summarizing distance for: {payload.plate_number}, period: {payload.start_at} → {payload.end_at}")
 
     query = db.query(
@@ -204,12 +179,8 @@ def summarize_distance(
     )
 
     filters = []
-
-    # 🧩 Multi-plate filter
     if payload.plate_number:
         filters.append(DrivingDistance.plate_number.in_(payload.plate_number))
-
-    # 🗓 Date range filter
     if payload.start_at and payload.end_at:
         filters.append(and_(DrivingDistance.date >= payload.start_at, DrivingDistance.date <= payload.end_at))
     elif payload.start_at:
@@ -220,17 +191,10 @@ def summarize_distance(
     if filters:
         query = query.filter(*filters)
 
-    # 🧮 Group & aggregate
-    results = (
-        query.group_by(DrivingDistance.plate_number)
-        .order_by(DrivingDistance.plate_number.asc())
-        .all()
-    )
-
+    results = query.group_by(DrivingDistance.plate_number).order_by(DrivingDistance.plate_number.asc()).all()
     if not results:
         raise HTTPException(status_code=404, detail="No records found for summary")
 
-    # 🕒 Format output
     summary = [
         {
             "plate_number": r.plate_number,
@@ -250,11 +214,8 @@ def summarize_distance(
 # ============================================================================
 @router.get("/platenumber")
 def get_unique_plate_numbers(
-    db: Session = Depends(lambda: next(get_db("DB_MAIN"))),
+    db: Session = Depends(get_main_db),
 ):
-    """
-    🚚 Retrieve all unique plate numbers from the drivingdistance table.
-    """
     logger.info("📋 Fetching unique plate numbers...")
 
     try:
