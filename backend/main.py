@@ -6,7 +6,7 @@ from .routers import drivingdistance_routes
 app = FastAPI(
     title="🚀 Analytics Backend API",
     description="Backend service for multi-database analytics and data pipelines.",
-    version="1.1.1"
+    version="1.1.2"
 )
 
 # Auto-create tables across all connected databases
