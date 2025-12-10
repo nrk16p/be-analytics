@@ -46,7 +46,7 @@ for key, url in DB_URLS.items():
         url,
         echo=False,                  # Debug SQL if needed
         pool_pre_ping=True,          # Detect dropped connections
-        pool_size=10,                # Persistent connections
+        pool_size=5,                # Persistent connections
         max_overflow=20,             # Burst capacity
         pool_timeout=60,             # Wait 60s if pool is full
         pool_recycle=1800,           # Recycle every 30min
